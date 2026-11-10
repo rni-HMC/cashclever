@@ -1,0 +1,100 @@
+name: backend
+
+on:
+  push:
+    branches: [main]
+    paths: &backend_paths
+      - 'backend/**'
+      - 'nix/backend.nix'
+      - 'nix/postgres.nix'
+      - 'nix/deploy.nix'
+      - 'nix/lib/backend-overrides.nix'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'render.yaml'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    paths: *backend_paths
+
+jobs:
+  gate:
+    name: Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v22
+
+      - name: Lint (ruff)
+        run: nix develop .#backend --command ruff check backend/
+
+      - name: Test (pytest against ephemeral Postgres)
+        run: nix run .#test
+
+      - name: Flake check
+        run: nix flake check
+
+      - name: Build backend Docker image
+        run: nix build .#backend-image
+
+  deploy:
+    name: Deploy
+    needs: gate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v22
+
+      - name: Build backend Docker image
+        run: nix build .#backend-image
+
+      - name: Load image into Docker
+        id: load
+        run: |
+          set -euo pipefail
+          # dockerTools.buildLayeredImage tags the loaded image with a content-hash,
+          # NOT "latest" -- parse the real reference out of `docker load`'s own
+          # "Loaded image: ..." output instead of hardcoding a tag that doesn't match
+          # reality.
+          loaded_ref="$(docker load < result | tee /dev/stderr | sed -n 's/^Loaded image: //p')"
+          if [ -z "$loaded_ref" ]; then
+            echo "Could not parse loaded image reference from 'docker load' output." >&2
+            exit 1
+          fi
+          echo "loaded_ref=${loaded_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute short SHA tag
+        id: sha
+        run: echo "short_sha=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+      # REPO: rni-hmc configured (and in render.yaml) once this cashclever has a real
+      # GitHub org/repo, and set the GHCR_PAT / RENDER_DEPLOY_HOOK_URL secrets.
+      - name: Tag image
+        env:
+          LOADED_REF: ${{ steps.load.outputs.loaded_ref }}
+          SHORT_SHA: ${{ steps.sha.outputs.short_sha }}
+        run: docker tag "${LOADED_REF}" "ghcr.io/rni-hmc/cashclever-backend:${SHORT_SHA}"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u rni-hmc --password-stdin
+
+      - name: Push image
+        env:
+          SHORT_SHA: ${{ steps.sha.outputs.short_sha }}
+        run: docker push "ghcr.io/rni-hmc/cashclever-backend:${SHORT_SHA}"
+
+      - name: Trigger Render deploy
+        env:
+          SHORT_SHA: ${{ steps.sha.outputs.short_sha }}
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          set -euo pipefail
+          IMG="ghcr.io/rni-hmc/cashclever-backend:${SHORT_SHA}"
+          ENCODED_IMG=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$IMG")
+          curl -fsS -X POST "${RENDER_DEPLOY_HOOK_URL}&imgURL=${ENCODED_IMG}"

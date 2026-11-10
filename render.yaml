@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: cashclever
+    runtime: image
+    image:
+      url: ghcr.io/rni-hmc/cashclever-backend:latest
+    envVars:
+      - key: DATABASE_URL
+        sync: false

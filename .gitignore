@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.pytest_cache/
+*.egg-info/
+.DS_Store
+
+# Nix / direnv
+.direnv/
+result
+result-*
+
+# Generated from backend/openapi.yaml via datamodel-code-generator -- see docs/SPEC.md.
+# Regenerated as a build step (nix run .#generate-openapi-models), never hand-edited,
+# never committed.
+backend/app/generated_models.py

@@ -1,0 +1,53 @@
+openapi: 3.1.0
+info:
+  title: Scaffold
+  description: Empty starter backend -- one dummy endpoint proving the FastAPI/OpenAPI/Postgres pipeline
+  version: "1.0"
+
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                required: [status]
+
+  /v1/ping:
+    post:
+      operationId: ping
+      tags: [ping]
+      description: >
+        Dummy endpoint. Writes one row to a Postgres table and returns the running
+        count of pings -- proves openapi.yaml -> generated_models.py -> FastAPI
+        response_model -> SQLAlchemy -> Postgres all wire together end to end.
+      responses:
+        "200":
+          description: pong
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PingOut" }
+
+components:
+  schemas:
+    PingOut:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        message: { type: string }
+        count: { type: integer }
+        created_at: { type: string, format: date-time }
+      required: [id, message, count, created_at]
+
+    ErrorDetail:
+      type: object
+      properties:
+        detail: { type: string }
+      required: [detail]
